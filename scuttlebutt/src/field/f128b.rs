@@ -1,5 +1,5 @@
 use crate::{
-    field::{f2::F2, polynomial::Polynomial, FiniteField},
+    field::{convolve::Convolve, f2::F2, polynomial::Polynomial, FiniteField},
     ring::{FiniteRing, IsSubRingOf},
     serialization::CanonicalSerialize,
 };
@@ -210,6 +210,8 @@ impl FiniteRing for F128b {
     const ZERO: Self = F128b(0);
     const ONE: Self = F128b(1);
 }
+
+impl Convolve for F128b {}
 
 impl CanonicalSerialize for F128b {
     type Serializer = crate::serialization::ByteElementSerializer<Self>;

@@ -11,7 +11,10 @@ pub use track_channel::TrackChannel;
 #[cfg(unix)]
 pub use unix_channel::{track_unix_channel_pair, unix_channel_pair, TrackUnixChannel, UnixChannel};
 
-use crate::{serialization::CanonicalSerialize, Block, Block512};
+use crate::{
+    serialization::{CanonicalSerialize, SequenceDeserializer, SequenceSerializer},
+    Block, Block512,
+};
 #[cfg(feature = "curve25519-dalek")]
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use generic_array::GenericArray;
@@ -208,9 +211,33 @@ pub trait AbstractChannel {
         Ok(fe)
     }
 
+    /// Write a sequence of `CanonicalSerialize` objects to the channel.
+    fn read_serializable_seq<E: CanonicalSerialize>(&mut self, n: usize) -> Result<Vec<E>> {
+        let buf = self.read_vec(E::Serializer::serialized_size(n))?;
+        let mut buf_slice = buf.as_slice();
+        let mut deserializer = E::Deserializer::new(&mut buf_slice)?;
+        let mut res = Vec::with_capacity(n);
+        for _ in 0..n {
+            res.push(deserializer.read(&mut buf_slice)?);
+        }
+        Ok(res)
+    }
+
     /// Write a `CanonicalSerialize` object to the channel.
     fn write_serializable<E: CanonicalSerialize>(&mut self, x: &E) -> Result<()> {
         self.write_bytes(&x.to_bytes())?;
+        Ok(())
+    }
+
+    /// Write a sequence of `CanonicalSerialize` objects to the channel.
+    fn write_serializable_seq<E: CanonicalSerialize>(&mut self, xs: &[E]) -> Result<()> {
+        let mut buf = Vec::with_capacity(E::Serializer::serialized_size(xs.len()));
+        let mut serializer = E::Serializer::new(&mut buf)?;
+        for &x in xs {
+            serializer.write(&mut buf, x)?;
+        }
+        serializer.finish(&mut buf)?;
+        self.write_bytes(&buf)?;
         Ok(())
     }
 }

@@ -1,8 +1,9 @@
-use crate::field::{polynomial::Polynomial, FiniteField, PrimeFiniteField};
+use crate::field::{convolve::Convolve, polynomial::Polynomial, FiniteField, PrimeFiniteField};
 use crate::ring::FiniteRing;
 use crate::serialization::{BiggerThanModulus, CanonicalSerialize};
 use generic_array::GenericArray;
 use rand_core::RngCore;
+use smallvec::{smallvec, SmallVec};
 use std::ops::{AddAssign, MulAssign, SubAssign};
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
@@ -107,6 +108,16 @@ fn reduce(k: u128) -> u64 {
     (i - operand) as u64
 }
 
+#[inline]
+fn full_reduce(k: u128) -> u64 {
+    // same as reduce, but also works for larger values
+    let i = (k & u128::from(MODULUS)) + (k >> 61);
+    let j = (i & u128::from(MODULUS)) + (i >> 61);
+    let flag = (j < u128::from(MODULUS)) as u128;
+    let operand = flag.wrapping_sub(1) & u128::from(MODULUS);
+    (j - operand) as u64
+}
+
 impl AddAssign<&F61p> for F61p {
     #[inline]
     fn add_assign(&mut self, rhs: &Self) {
@@ -156,6 +167,78 @@ impl std::iter::Sum for F61p {
     }
 }
 
+impl Convolve for F61p {
+    fn convolve(z0: &mut Self, zs: &mut [Self], x0: Self, xs: &[Self], y0: Self, ys: &[Self]) {
+        #[inline(always)]
+        fn rlmul(x: u64, y: u64) -> u128 {
+            u128::from(x) * u128::from(y)
+        }
+
+        if ys.len() > xs.len() {
+            return Self::convolve(z0, zs, y0, ys, x0, xs);
+        }
+
+        let x_deg = xs.len();
+        let y_deg = ys.len();
+        let z_deg = x_deg + y_deg;
+
+        assert_eq!(zs.len(), z_deg);
+        debug_assert!(x_deg >= y_deg);
+
+        *z0 = x0 * y0;
+        if y_deg == 0 {
+            for i in 0..x_deg {
+                zs[i] = xs[i] * y0;
+            }
+            return;
+        }
+
+        for k in 0..y_deg {
+            let mut t = rlmul(x0.0, ys[k].0) + rlmul(xs[k].0, y0.0);
+            for i in 0..k {
+                let j = k - i - 1;
+                t += rlmul(xs[i].0, ys[j].0);
+            }
+            zs[k] = F61p(full_reduce(t));
+        }
+        for k in y_deg..x_deg {
+            let mut t = rlmul(xs[k].0, y0.0);
+            for i in k - y_deg..k {
+                let j = k - i - 1;
+                t += rlmul(xs[i].0, ys[j].0);
+            }
+            zs[k] = F61p(full_reduce(t));
+        }
+        for k in x_deg..z_deg - 1 {
+            let mut t = 0u128;
+            for i in k - y_deg..x_deg {
+                let j = k - i - 1;
+                t += rlmul(xs[i].0, ys[j].0);
+            }
+            zs[k] = F61p(full_reduce(t));
+        }
+        zs[z_deg - 1] = xs[x_deg - 1] * ys[y_deg - 1];
+
+        // assert_eq!(zs.len(), xs.len() + ys.len());
+        // *z0 = x0 * y0;
+        // let mut zs_int: SmallVec<[_; 32]> = smallvec![0u128; zs.len()];
+        // for i in 0..ys.len() {
+        //     zs_int[i] = u128::from(x0.0) * u128::from(ys[i].0);
+        // }
+        // for i in 0..xs.len() {
+        //     zs_int[i] += u128::from(y0.0) * u128::from(xs[i].0);
+        // }
+        // for i in 0..xs.len() {
+        //     for j in 0..ys.len() {
+        //         zs_int[i + j + 1] += u128::from(xs[i].0) * u128::from(ys[j].0);
+        //     }
+        // }
+        // for i in 0..zs.len() {
+        //     zs[i] = F61p(full_reduce(zs_int[i]));
+        // }
+    }
+}
+
 impl TryFrom<u128> for F61p {
     type Error = BiggerThanModulus;
 
@@ -167,6 +250,12 @@ impl TryFrom<u128> for F61p {
         } else {
             Err(BiggerThanModulus)
         }
+    }
+}
+
+impl From<F61p> for u128 {
+    fn from(value: F61p) -> Self {
+        value.0 as u128
     }
 }
 

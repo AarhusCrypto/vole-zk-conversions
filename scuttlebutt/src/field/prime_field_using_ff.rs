@@ -88,7 +88,7 @@ macro_rules! prime_field_using_ff {
         $(single_limb_modulus = $single_limb_modulus: expr)?
     ) => {
         mod $mod_name {
-            use crate::field::{FiniteField, Polynomial, PrimeFiniteField};
+            use crate::field::{FiniteField, Polynomial, PrimeFiniteField, convolve::Convolve};
             use crate::serialization::{CanonicalSerialize, BiggerThanModulus};
             use crate::ring::FiniteRing;
             use ff::{Field, PrimeField};
@@ -194,6 +194,8 @@ macro_rules! prime_field_using_ff {
                     Self::random(&mut rand_chacha::ChaCha20Rng::from_seed(seed))
                 }
             }
+
+            impl Convolve for $name {}
 
             impl FiniteField for $name {
                 fn inverse(&self) -> Self {

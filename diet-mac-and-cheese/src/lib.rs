@@ -18,15 +18,22 @@ will directly return an error.
 mod backend;
 pub mod backend_multifield;
 pub mod backend_trait;
+pub mod cheddabits;
+pub mod cheddaconv;
+pub mod cheddaprg;
 pub mod circuit_ir;
+pub mod conv;
 pub mod edabits;
 mod fields;
+pub mod hd_quicksilver;
 pub mod homcom;
 pub(crate) mod memory;
 #[allow(clippy::all)]
 pub mod read_sieveir_phase2;
 mod sieveir_phase2;
 pub mod text_reader;
+pub mod trunc;
 pub use backend::{from_bytes_le, DietMacAndCheeseProver, DietMacAndCheeseVerifier};
 pub mod backend_zki;
+pub mod benchmark_tools;
 pub(crate) mod plugins;

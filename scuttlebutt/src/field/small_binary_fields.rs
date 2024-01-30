@@ -1,4 +1,4 @@
-use crate::field::{Degree, FiniteField, Polynomial, F2};
+use crate::field::{convolve::Convolve, Degree, FiniteField, Polynomial, F2};
 use crate::ring::FiniteRing;
 use crate::serialization::{BiggerThanModulus, CanonicalSerialize};
 use bytemuck::{TransparentWrapper, Zeroable};
@@ -148,6 +148,87 @@ macro_rules! small_binary_field {
             }
             const ZERO: Self = $name(0);
             const ONE: Self = $name(1);
+        }
+
+        impl Convolve for $name {
+            // fn convolve(z0: &mut Self, zs: &mut [Self], x0: Self, xs: &[Self], y0: Self, ys: &[Self]) {
+            //     #[inline(always)]
+            //     fn clmul(x: u64, y: u64) -> U64x2 {
+            //         U64x2::set_lo(x).carryless_mul::<false, false>(U64x2::set_lo(y))
+            //     }
+            //
+            //     if ys.len() > xs.len() { return Self::convolve(z0, zs, y0, ys, x0, xs); }
+            //
+            //     let x_deg = xs.len();
+            //     let y_deg = ys.len();
+            //     let z_deg = x_deg + y_deg;
+            //
+            //     *z0 = x0 * y0;
+            //     if y_deg == 0 {
+            //         for i in 0..x_deg {
+            //             zs[i] = xs[i] * y0;
+            //         }
+            //         return;
+            //     } else if y_deg == 1 {
+            //         zs[0] = Self::reduce(clmul(xs[0].0, y0.0) ^ clmul(x0.0, ys[0].0));
+            //         for i in 1..x_deg {
+            //             zs[i] = Self::reduce(clmul(xs[i].0, y0.0) ^ clmul(xs[i - 1].0, ys[0].0));
+            //         }
+            //         zs[x_deg] = xs[x_deg-1] * ys[0];
+            //         return;
+            //     }
+            //     else if y_deg == 2 {
+            //         zs[0] = Self::reduce(clmul(xs[0].0, y0.0) ^ clmul(x0.0, ys[0].0));
+            //         zs[1] = Self::reduce(clmul(xs[1].0, y0.0) ^ clmul(xs[0].0, ys[0].0) ^ clmul(x0.0, ys[1].0));
+            //         for i in 2..x_deg {
+            //             zs[i] = Self::reduce(clmul(xs[i].0, y0.0) ^ clmul(xs[i - 1].0, ys[0].0) ^ clmul(xs[i - 2].0, ys[1].0));
+            //         }
+            //         zs[x_deg] = Self::reduce(clmul(xs[x_deg - 2].0, ys[1].0) ^ clmul(xs[x_deg - 1].0, ys[0].0));
+            //         zs[x_deg + 1] = xs[x_deg-1] * ys[1];
+            //         return;
+            //     }
+            //     else if y_deg == 3 {
+            //         zs[0] = Self::reduce(clmul(xs[0].0, y0.0) ^ clmul(x0.0, ys[0].0));
+            //         zs[1] = Self::reduce(clmul(xs[1].0, y0.0) ^ clmul(xs[0].0, ys[0].0) ^ clmul(x0.0, ys[1].0));
+            //         zs[2] = Self::reduce(clmul(xs[2].0, y0.0) ^ clmul(xs[1].0, ys[0].0) ^ clmul(xs[0].0, ys[1].0) ^ clmul(x0.0, ys[2].0));
+            //         for i in 3..x_deg {
+            //             zs[i] = Self::reduce(clmul(xs[i].0, y0.0) ^ clmul(xs[i - 1].0, ys[0].0) ^ clmul(xs[i - 2].0, ys[1].0) ^ clmul(xs[i - 3].0, ys[2].0));
+            //         }
+            //         zs[x_deg] = Self::reduce(clmul(xs[x_deg - 3].0, ys[2].0) ^ clmul(xs[x_deg - 2].0, ys[1].0) ^ clmul(xs[x_deg - 1].0, ys[0].0));
+            //         zs[x_deg + 1] = Self::reduce(clmul(xs[x_deg - 2].0, ys[2].0) ^ clmul(xs[x_deg - 1].0, ys[1].0));
+            //         zs[x_deg + 2] = xs[x_deg-1] * ys[2];
+            //         return;
+            //     }
+            //
+            //     assert_eq!(zs.len(), z_deg);
+            //     debug_assert!(x_deg >= y_deg);
+            //
+            //     for k in 0..y_deg {
+            //         let mut t = clmul(x0.0, ys[k].0) ^ clmul(xs[k].0, y0.0);
+            //         for i in 0..k {
+            //             let j = k - i - 1;
+            //             t ^= clmul(xs[i].0, ys[j].0);
+            //         }
+            //         zs[k] = Self::reduce(t);
+            //     }
+            //     for k in y_deg..x_deg {
+            //         let mut t = clmul(xs[k].0, y0.0);
+            //         for i in k-y_deg..k {
+            //             let j = k - i - 1;
+            //             t ^= clmul(xs[i].0, ys[j].0);
+            //         }
+            //         zs[k] = Self::reduce(t);
+            //     }
+            //     for k in x_deg..z_deg-1 {
+            //         let mut t = U64x2::ZERO;
+            //         for i in k-y_deg..x_deg {
+            //             let j = k - i - 1;
+            //             t ^= clmul(xs[i].0, ys[j].0);
+            //         }
+            //         zs[k] = Self::reduce(t);
+            //     }
+            //     zs[z_deg-1] = xs[x_deg-1] * ys[y_deg-1];
+            // }
         }
 
         impl FiniteField for $name {

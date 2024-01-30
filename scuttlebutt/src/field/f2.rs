@@ -5,7 +5,7 @@
 
 use crate::serialization::{SequenceDeserializer, SequenceSerializer};
 use crate::{
-    field::{polynomial::Polynomial, FiniteField, PrimeFiniteField},
+    field::{convolve::Convolve, polynomial::Polynomial, FiniteField, PrimeFiniteField},
     ring::FiniteRing,
     serialization::{BiggerThanModulus, CanonicalSerialize},
 };
@@ -70,6 +70,8 @@ impl FiniteRing for F2 {
         F2(value as u8)
     }
 }
+
+impl Convolve for F2 {}
 
 impl CanonicalSerialize for F2 {
     type Serializer = F2BitSerializer;

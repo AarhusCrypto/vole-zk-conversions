@@ -1,4 +1,4 @@
-use crate::field::{polynomial::Polynomial, FiniteField, F2};
+use crate::field::{convolve::Convolve, polynomial::Polynomial, FiniteField, F2};
 use crate::ring::{FiniteRing, IsSubRingOf};
 use crate::serialization::{BytesDeserializationCannotFail, CanonicalSerialize};
 use generic_array::GenericArray;
@@ -149,6 +149,8 @@ impl FiniteField for F64b {
         self.pow_var_time((1 << 64) - 2)
     }
 }
+
+impl Convolve for F64b {}
 
 field_ops!(F64b);
 

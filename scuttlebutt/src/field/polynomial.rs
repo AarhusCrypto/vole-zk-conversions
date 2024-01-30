@@ -1,5 +1,6 @@
 //! This module defines polynomials (and their operations) over finite fields.
 
+use crate::field::convolve::Convolve;
 use crate::field::FiniteField;
 use rand::RngCore;
 use smallvec::{smallvec, SmallVec};
@@ -42,17 +43,21 @@ pub fn lagrange_denominator<F: FiniteField>(points: &[F], u: F) -> F {
 }
 
 /// A polynomial over some given finite field, represented as the coefficient vector.
+/// `D` specifies the degree up to which the polynomial is stored on the stack.
 #[derive(Clone, Eq)]
-pub struct Polynomial<FE: FiniteField> {
+pub struct GeneralPolynomial<FE: FiniteField, const D: usize> {
     /// The coefficient for $`x^0`$
     pub constant: FE,
     /// The coefficients for $`x^1, ..., x^n`$
     ///
     /// `coefficients[i]` is the coefficient for $`x^{i+1}`$
-    pub coefficients: SmallVec<[FE; 3]>,
+    pub coefficients: SmallVec<[FE; D]>,
 }
 
-impl<FE: FiniteField> Polynomial<FE> {
+/// `GeneralPolynomial` with `D = 3`.
+pub type Polynomial<FE> = GeneralPolynomial<FE, 3>;
+
+impl<FE: FiniteField, const D: usize> GeneralPolynomial<FE, D> {
     /// Construct a random polynomial of the given degree.
     pub fn random(rng: &mut (impl RngCore + ?Sized), degree: usize) -> Self {
         let constant = FE::random(rng);
@@ -85,10 +90,20 @@ impl<FE: FiniteField> Polynomial<FE> {
 
     /// Return the polynomial `P(x) = x`
     pub fn x() -> Self {
-        Polynomial {
+        Self {
             constant: FE::ZERO,
             coefficients: smallvec![FE::ONE],
         }
+    }
+
+    /// Multiply polynomial by `x^n`
+    pub fn shift_mut(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        self.coefficients
+            .insert_many(0, std::iter::repeat(FE::ZERO).take(n));
+        std::mem::swap(&mut self.coefficients[n - 1], &mut self.constant);
     }
 
     /// Return the degree of the polynomial
@@ -130,7 +145,7 @@ impl<FE: FiniteField> Polynomial<FE> {
             // b - d is positive, since r.degree() > divisor.degree()
             // lead(r) / lead(divisor) = (a/c) * x ^ (b-d)
             let b = r.degree();
-            let mut t = Polynomial {
+            let mut t = Self {
                 constant: FE::ZERO,
                 coefficients: smallvec![FE::ZERO; b.checked_sub(d).unwrap()],
             };
@@ -148,12 +163,12 @@ impl<FE: FiniteField> Polynomial<FE> {
     /// This function will panic if `points` is empty, or if any `x` values collide.
     pub fn interpolate(points: &[(FE, FE)]) -> Self {
         assert!(!points.is_empty());
-        let mut out = Polynomial {
+        let mut out = Self {
             constant: FE::ZERO,
             coefficients: smallvec![FE::ZERO; points.len() - 1],
         };
         for (j, (xj, yj)) in points.iter().enumerate() {
-            let mut l = Polynomial::one();
+            let mut l = Self::one();
             for (m, (xm, _)) in points.iter().enumerate() {
                 if m == j {
                     continue;
@@ -161,7 +176,7 @@ impl<FE: FiniteField> Polynomial<FE> {
                 assert_ne!(*xm, *xj);
                 let delta_x = *xj - *xm;
                 let delta_x_inverse = delta_x.inverse();
-                l *= &Polynomial {
+                l *= &Self {
                     constant: -(*xm) * delta_x_inverse,
                     coefficients: smallvec![delta_x_inverse],
                 };
@@ -173,8 +188,10 @@ impl<FE: FiniteField> Polynomial<FE> {
     }
 }
 
-impl<'a, FE: FiniteField> AddAssign<&'a Polynomial<FE>> for Polynomial<FE> {
-    fn add_assign(&mut self, rhs: &'a Polynomial<FE>) {
+impl<'a, FE: FiniteField, const D: usize> AddAssign<&'a GeneralPolynomial<FE, D>>
+    for GeneralPolynomial<FE, D>
+{
+    fn add_assign(&mut self, rhs: &'a GeneralPolynomial<FE, D>) {
         self.coefficients.resize(
             self.coefficients.len().max(rhs.coefficients.len()),
             FE::ZERO,
@@ -186,8 +203,10 @@ impl<'a, FE: FiniteField> AddAssign<&'a Polynomial<FE>> for Polynomial<FE> {
     }
 }
 
-impl<'a, FE: FiniteField> SubAssign<&'a Polynomial<FE>> for Polynomial<FE> {
-    fn sub_assign(&mut self, rhs: &'a Polynomial<FE>) {
+impl<'a, FE: FiniteField, const D: usize> SubAssign<&'a GeneralPolynomial<FE, D>>
+    for GeneralPolynomial<FE, D>
+{
+    fn sub_assign(&mut self, rhs: &'a GeneralPolynomial<FE, D>) {
         self.coefficients.resize(
             self.coefficients.len().max(rhs.coefficients.len()),
             FE::ZERO,
@@ -199,7 +218,7 @@ impl<'a, FE: FiniteField> SubAssign<&'a Polynomial<FE>> for Polynomial<FE> {
     }
 }
 
-impl<FE: FiniteField> MulAssign<FE> for Polynomial<FE> {
+impl<FE: FiniteField, const D: usize> MulAssign<FE> for GeneralPolynomial<FE, D> {
     fn mul_assign(&mut self, rhs: FE) {
         self.constant *= rhs;
         for coeff in self.coefficients.iter_mut() {
@@ -209,7 +228,7 @@ impl<FE: FiniteField> MulAssign<FE> for Polynomial<FE> {
 }
 
 /// Index into the Polynomial where 0 is the constant term.
-impl<FE: FiniteField> Index<usize> for Polynomial<FE> {
+impl<FE: FiniteField, const D: usize> Index<usize> for GeneralPolynomial<FE, D> {
     type Output = FE;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -222,7 +241,7 @@ impl<FE: FiniteField> Index<usize> for Polynomial<FE> {
 }
 
 /// Index into the Polynomial where 0 is the constant term.
-impl<FE: FiniteField> IndexMut<usize> for Polynomial<FE> {
+impl<FE: FiniteField, const D: usize> IndexMut<usize> for GeneralPolynomial<FE, D> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         if index == 0 {
             &mut self.constant
@@ -232,32 +251,38 @@ impl<FE: FiniteField> IndexMut<usize> for Polynomial<FE> {
     }
 }
 
-impl<'a, FE: FiniteField> MulAssign<&'a Polynomial<FE>> for Polynomial<FE> {
-    fn mul_assign(&mut self, rhs: &'a Polynomial<FE>) {
+impl<'a, FE: FiniteField, const D: usize> MulAssign<&'a GeneralPolynomial<FE, D>>
+    for GeneralPolynomial<FE, D>
+{
+    fn mul_assign(&mut self, rhs: &'a GeneralPolynomial<FE, D>) {
         // TODO: this is the most naive, most simple, and slowest implementation of multiplication.
         // If this is a bottleneck, then pick a faster algorithm.
-        let tmp = self.clone();
-        self.constant = FE::ZERO;
-        for x in self.coefficients.iter_mut() {
-            *x = FE::ZERO;
-        }
-        self.coefficients
-            .resize(tmp.degree() + rhs.degree(), FE::ZERO);
-        for i in 0..tmp.degree() + 1 {
-            for j in 0..rhs.degree() + 1 {
-                self[i + j] += tmp[i] * rhs[j];
-            }
-        }
+        let mut new_constant = FE::ZERO;
+        let deg_self = self.degree();
+        let deg_rhs = rhs.degree();
+        let mut new_coefficients = smallvec![FE::ZERO; deg_self + deg_rhs];
+        <FE as Convolve>::convolve(
+            &mut new_constant,
+            &mut new_coefficients,
+            self.constant,
+            &self.coefficients[..deg_self],
+            rhs.constant,
+            &rhs.coefficients[..deg_rhs],
+        );
+        *self = Self {
+            constant: new_constant,
+            coefficients: new_coefficients,
+        };
     }
 }
 
-impl<FE: FiniteField> PartialEq for Polynomial<FE> {
+impl<FE: FiniteField, const D: usize> PartialEq for GeneralPolynomial<FE, D> {
     fn eq(&self, other: &Self) -> bool {
         self.ct_eq(other).into()
     }
 }
 
-impl<FE: FiniteField> ConstantTimeEq for Polynomial<FE> {
+impl<FE: FiniteField, const D: usize> ConstantTimeEq for GeneralPolynomial<FE, D> {
     fn ct_eq(&self, other: &Self) -> Choice {
         let mut out = self.constant.ct_eq(&other.constant);
         for (a, b) in self
@@ -280,7 +305,7 @@ impl<FE: FiniteField> ConstantTimeEq for Polynomial<FE> {
     }
 }
 
-impl<FE: FiniteField> From<&[FE]> for Polynomial<FE> {
+impl<FE: FiniteField, const D: usize> From<&[FE]> for GeneralPolynomial<FE, D> {
     fn from(v: &[FE]) -> Self {
         match v.len() {
             0 => Self::zero(),
@@ -293,7 +318,7 @@ impl<FE: FiniteField> From<&[FE]> for Polynomial<FE> {
     }
 }
 
-impl<FE: FiniteField> Debug for Polynomial<FE> {
+impl<FE: FiniteField, const D: usize> Debug for GeneralPolynomial<FE, D> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "P(X) = {:?}", self.constant)?;
         for (i, coeff) in self.coefficients.iter().enumerate() {

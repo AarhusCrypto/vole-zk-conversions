@@ -1,6 +1,7 @@
 //! This module defines finite fields.
 
 use crate::{
+    field::convolve::Convolve,
     field::polynomial::Polynomial,
     generic_array_length::AnyArrayLength,
     ring::{FiniteRing, IsSubRingOf},
@@ -9,7 +10,7 @@ use generic_array::{ArrayLength, GenericArray};
 use std::ops::{Div, DivAssign};
 
 /// Types that implement this trait are finite fields.
-pub trait FiniteField: FiniteRing + DivAssign<Self> + Div<Self, Output = Self> {
+pub trait FiniteField: FiniteRing + DivAssign<Self> + Div<Self, Output = Self> + Convolve {
     /// The prime-order subfield of the finite field.
     type PrimeField: PrimeFiniteField + IsSubFieldOf<Self>;
     /// Multiplication over field elements should be reduced over this polynomial.
@@ -222,6 +223,7 @@ mod f2e19x3e26;
 #[cfg(feature = "ff")]
 pub use f2e19x3e26::F2e19x3e26;
 
+pub mod convolve;
 pub mod polynomial;
 
 pub mod fft;

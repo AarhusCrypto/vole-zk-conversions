@@ -21,20 +21,28 @@ rand.workspace = true
 clap.workspace = true
 eyre.workspace = true
 generic-array.workspace = true
+itertools.workspace = true
 log.workspace = true
 mac-n-cheese-sieve-parser.workspace = true
 pretty_env_logger.workspace = true
 num-bigint.workspace = true
 num-traits.workspace = true
 scuttlebutt.workspace = true
+smallvec.workspace = true
 subtle.workspace = true
 ocelot.workspace = true
 zki_sieve.workspace = true
 flatbuffers.workspace = true
 nix.workspace = true
+git-version = "0.3.9"
+serde.workspace = true
+serde_json.workspace = true
 
 [build-dependencies]
 swanky-flatbuffer-build.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
 
 [[example]]
 name = "network_edabits"
@@ -44,6 +52,10 @@ path = "examples/network_edabits.rs"
 name = "edabits"
 path = "examples/edabits.rs"
 
+[[example]]
+name = "bench"
+path = "examples/bench.rs"
+
 [[bin]]
 name = "dietmc_zki"
 path = "bin/dietmc_zki.rs"
@@ -51,3 +63,7 @@ path = "bin/dietmc_zki.rs"
 [[bin]]
 name = "dietmc_0p"
 path = "bin/dietmc_0p.rs"
+
+[[bench]]
+name = "cheddaprg"
+harness = false

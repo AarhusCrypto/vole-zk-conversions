@@ -95,6 +95,17 @@ pub const LPN_EXTEND_LARGE: LpnParams = LpnParams {
     weight: 1_319,
 };
 
+/// Select LPN parameters to minimize the number of extend operations
+pub fn choose_lpn_parameters<FE: FiniteField>(num_voles: usize) -> (LpnParams, LpnParams) {
+    if num_voles >= LPN_EXTEND_MEDIUM.cols - compute_num_saved::<FE>(LPN_EXTEND_MEDIUM) {
+        (LPN_SETUP_LARGE, LPN_EXTEND_LARGE)
+    } else if num_voles >= LPN_EXTEND_SMALL.cols - compute_num_saved::<FE>(LPN_EXTEND_SMALL) {
+        (LPN_SETUP_MEDIUM, LPN_EXTEND_MEDIUM)
+    } else {
+        (LPN_SETUP_SMALL, LPN_EXTEND_SMALL)
+    }
+}
+
 // Constant `d` representing a `d`-local linear code, meaning that each column
 // of the LPN matrix contains exactly `d` non-zero entries.
 const LPN_PARAMS_D: usize = 10;
@@ -143,6 +154,7 @@ impl<FE: FiniteField> Sender<FE> {
         rng: &mut RNG,
         output: &mut Vec<(FE::PrimeField, FE)>,
     ) -> Result<(), Error> {
+        let old_output_len = output.len();
         let rows = params.rows;
         let cols = params.cols;
         let weight = params.weight;
@@ -170,9 +182,8 @@ impl<FE: FiniteField> Sender<FE> {
         // The VOLEs we'll save for the next iteration.
         let mut base_voles = Vec::with_capacity(num_saved + leftover);
         // The VOLEs we'll return to the caller.
-        output.clear();
         let out_len = cols - num_saved;
-        output.reserve(out_len);
+        output.reserve(old_output_len + out_len);
         assert!(rows <= 4_294_967_295); // 2^32 -1
         let distribution = Uniform::<u32>::from(0..rows.try_into().unwrap());
         for (i, (e, c)) in uws.into_iter().enumerate() {
@@ -194,7 +205,7 @@ impl<FE: FiniteField> Sender<FE> {
         base_voles.extend(self.base_voles[used..].iter());
         self.base_voles = base_voles;
         debug_assert_eq!(self.base_voles.len(), num_saved + leftover);
-        debug_assert_eq!(output.len(), cols - num_saved);
+        debug_assert_eq!(output.len(), old_output_len + cols - num_saved);
         Ok(())
     }
 }
@@ -309,6 +320,7 @@ impl<FE: FiniteField> Receiver<FE> {
         rng: &mut RNG,
         output: &mut Vec<FE>,
     ) -> Result<(), Error> {
+        let old_output_len = output.len();
         let rows = params.rows;
         let cols = params.cols;
         let weight = params.weight;
@@ -333,8 +345,8 @@ impl<FE: FiniteField> Receiver<FE> {
                 .receive(channel, m, &self.base_voles[rows..rows + weight + r], rng)?;
         debug_assert!(vs.len() == cols);
         let mut base_voles = Vec::with_capacity(num_saved + leftover);
-        output.clear();
-        output.reserve(cols - num_saved);
+        let out_len = cols - num_saved;
+        output.reserve(old_output_len + out_len);
         assert!(rows <= 4_294_967_295); // 2^32 -1
         let distribution = Uniform::<u32>::from(0..rows.try_into().unwrap());
         for (i, b) in vs.into_iter().enumerate() {
@@ -351,7 +363,7 @@ impl<FE: FiniteField> Receiver<FE> {
         }
         base_voles.extend(self.base_voles[used..].iter());
         self.base_voles = base_voles;
-        debug_assert_eq!(output.len(), cols - num_saved);
+        debug_assert_eq!(output.len(), old_output_len + cols - num_saved);
         Ok(())
     }
 }

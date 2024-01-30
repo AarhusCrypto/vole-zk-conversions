@@ -14,6 +14,7 @@ use scuttlebutt::field::Degree;
 use scuttlebutt::ring::FiniteRing;
 use scuttlebutt::serialization::CanonicalSerialize;
 use scuttlebutt::{field::FiniteField, AbstractChannel, AesRng, Block};
+use serde::Serialize;
 use std::time::Instant;
 use subtle::{Choice, ConditionallySelectable};
 
@@ -249,10 +250,20 @@ impl<FE: FiniteField> ConditionallySelectable for MacVerifier<FE> {
     }
 }
 
+/// Statistics for a VOLE-extension based FCom implementation
+#[derive(Copy, Clone, Debug, Default, PartialEq, Serialize)]
+pub struct FComStats {
+    /// Number of random VOLEs used
+    pub num_voles_used: usize,
+    /// Number of times the VOLE extension protocol is executed
+    pub num_vole_extensions_performed: usize,
+}
+
 /// F_com protocol for the Prover
 pub struct FComProver<FE: FiniteField> {
     svole_sender: Sender<FE>,
     voles: Vec<(FE::PrimeField, FE)>,
+    stats: FComStats,
 }
 
 fn make_x_i<FE: FiniteField>(i: usize) -> FE {
@@ -312,6 +323,7 @@ impl<FE: FiniteField> FComProver<FE> {
         Ok(Self {
             svole_sender: Sender::init(channel, rng, lpn_setup, lpn_extend)?,
             voles: Vec::new(),
+            stats: Default::default(),
         })
     }
 
@@ -324,7 +336,16 @@ impl<FE: FiniteField> FComProver<FE> {
         Ok(Self {
             svole_sender: self.svole_sender.duplicate(channel, rng)?,
             voles: Vec::new(),
+            stats: Default::default(),
         })
+    }
+
+    pub fn get_stats(&self) -> FComStats {
+        self.stats
+    }
+
+    pub fn clear_stats(&mut self) {
+        self.stats = Default::default();
     }
 
     /// Returns a random mac.
@@ -333,9 +354,11 @@ impl<FE: FiniteField> FComProver<FE> {
         channel: &mut C,
         rng: &mut RNG,
     ) -> Result<MacProver<FE>> {
+        self.stats.num_voles_used += 1;
         match self.voles.pop() {
             Some(e) => Ok(MacProver(e.0, e.1)),
             None => {
+                self.stats.num_vole_extensions_performed += 1;
                 self.svole_sender.send(channel, rng, &mut self.voles)?;
                 match self.voles.pop() {
                     Some(e) => Ok(MacProver(e.0, e.1)),
@@ -365,12 +388,14 @@ impl<FE: FiniteField> FComProver<FE> {
         x: &[FE::PrimeField],
         out: &mut Vec<FE>,
     ) -> Result<()> {
+        let mut corrections = Vec::with_capacity(x.len());
         for x_i in x {
             let r = self.random(channel, rng)?;
             let y = *x_i - r.0;
             out.push(r.1);
-            channel.write_serializable::<FE::PrimeField>(&y)?;
+            corrections.push(y);
         }
+        channel.write_serializable_seq::<FE::PrimeField>(&corrections)?;
         Ok(())
     }
 
@@ -572,6 +597,27 @@ impl<FE: FiniteField> FComProver<FE> {
     pub fn reset(&mut self, quick_state: &mut StateMultCheckProver<FE>) {
         quick_state.reset();
     }
+
+    pub fn voles_available(&self) -> usize {
+        self.voles.len()
+    }
+
+    pub fn voles_clear(&mut self) {
+        self.voles.clear();
+    }
+
+    pub fn voles_reserve<C: AbstractChannel, RNG: CryptoRng + Rng>(
+        &mut self,
+        channel: &mut C,
+        rng: &mut RNG,
+        n: usize,
+    ) -> Result<()> {
+        while self.voles.len() < n {
+            self.stats.num_vole_extensions_performed += 1;
+            self.svole_sender.send(channel, rng, &mut self.voles)?;
+        }
+        Ok(())
+    }
 }
 
 /// F_com protocol for the Verififier
@@ -579,6 +625,7 @@ pub struct FComVerifier<FE: FiniteField> {
     delta: FE,
     svole_receiver: Receiver<FE>,
     voles: Vec<FE>,
+    stats: FComStats,
 }
 
 pub struct StateMultCheckVerifier<FE> {
@@ -636,6 +683,7 @@ impl<FE: FiniteField> FComVerifier<FE> {
             delta: recv.delta(),
             svole_receiver: recv,
             voles: Vec::new(),
+            stats: Default::default(),
         })
     }
 
@@ -649,7 +697,16 @@ impl<FE: FiniteField> FComVerifier<FE> {
             delta: self.get_delta(),
             svole_receiver: self.svole_receiver.duplicate(channel, rng)?,
             voles: Vec::new(),
+            stats: Default::default(),
         })
+    }
+
+    pub fn get_stats(&self) -> FComStats {
+        self.stats
+    }
+
+    pub fn clear_stats(&mut self) {
+        self.stats = Default::default();
     }
 
     /// Returns the delta Mac.
@@ -664,10 +721,12 @@ impl<FE: FiniteField> FComVerifier<FE> {
         channel: &mut C,
         rng: &mut RNG,
     ) -> Result<MacVerifier<FE>> {
+        self.stats.num_voles_used += 1;
         match self.voles.pop() {
             Some(e) => Ok(MacVerifier(e)),
             None => {
                 let _start = Instant::now();
+                self.stats.num_vole_extensions_performed += 1;
                 self.svole_receiver.receive(channel, rng, &mut self.voles)?;
                 info!(
                     "SVOLE<time:{:?} field:{:?}>",
@@ -702,10 +761,13 @@ impl<FE: FiniteField> FComVerifier<FE> {
         num: usize,
         out: &mut Vec<MacVerifier<FE>>,
     ) -> Result<()> {
-        for _i in 0..num {
-            let r = self.random(channel, rng)?;
-            let y = channel.read_serializable::<FE::PrimeField>()?;
-            out.push(MacVerifier(r.0 - y * self.delta));
+        assert!(out.is_empty());
+        for _ in 0..num {
+            out.push(self.random(channel, rng)?);
+        }
+        let corrections = channel.read_serializable_seq::<FE::PrimeField>(num)?;
+        for (o_i, c_i) in out.iter_mut().zip(corrections.into_iter()) {
+            o_i.0 -= c_i * self.delta;
         }
         Ok(())
     }
@@ -917,6 +979,27 @@ impl<FE: FiniteField> FComVerifier<FE> {
     /// Reset internal state of functionality
     pub fn reset(&mut self, quick_state: &mut StateMultCheckVerifier<FE>) {
         quick_state.reset();
+    }
+
+    pub fn voles_available(&self) -> usize {
+        self.voles.len()
+    }
+
+    pub fn voles_clear(&mut self) {
+        self.voles.clear();
+    }
+
+    pub fn voles_reserve<C: AbstractChannel, RNG: CryptoRng + Rng>(
+        &mut self,
+        channel: &mut C,
+        rng: &mut RNG,
+        n: usize,
+    ) -> Result<()> {
+        while self.voles.len() < n {
+            self.stats.num_vole_extensions_performed += 1;
+            self.svole_receiver.receive(channel, rng, &mut self.voles)?;
+        }
+        Ok(())
     }
 }
 

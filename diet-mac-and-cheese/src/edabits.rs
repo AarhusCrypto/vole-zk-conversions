@@ -4,15 +4,19 @@
 
 //! Field switching functionality based on protocol with Edabuts.
 
+use crate::conv::{ConvProverT, ConvVerifierT, ProverFromHomComsT, VerifierFromHomComsT};
+pub use crate::conv::{EdabitsProver, EdabitsVerifier};
 use crate::homcom::{FComProver, FComVerifier, MacProver, MacVerifier};
+use crate::trunc::{FPMProverT, FPMVerifierT, MultTripleProver, MultTripleVerifier};
 use eyre::{eyre, Result};
 use generic_array::typenum::Unsigned;
+use itertools::izip;
 #[allow(unused)]
 use log::{debug, info, warn};
 use ocelot::svole::wykw::LpnParams;
 use rand::{CryptoRng, Rng, SeedableRng};
 use scuttlebutt::{
-    field::{F40b, FiniteField, F2},
+    field::{Degree, F40b, FiniteField, F2},
     ring::FiniteRing,
     AbstractChannel, AesRng, Block, SyncChannel,
 };
@@ -25,15 +29,6 @@ use std::{
 };
 use subtle::{ConditionallySelectable, ConstantTimeEq};
 
-/// EdabitsProver struct
-#[derive(Clone)]
-pub struct EdabitsProver<FE: FiniteField> {
-    #[allow(missing_docs)]
-    pub bits: Vec<MacProver<F40b>>,
-    #[allow(missing_docs)]
-    pub value: MacProver<FE>,
-}
-
 #[allow(unused)]
 fn copy_edabits_prover<FE: FiniteField>(edabits: &EdabitsProver<FE>) -> EdabitsProver<FE> {
     let num_bits = edabits.bits.len();
@@ -45,15 +40,6 @@ fn copy_edabits_prover<FE: FiniteField>(edabits: &EdabitsProver<FE>) -> EdabitsP
         bits: bits_par,
         value: edabits.value,
     }
-}
-
-/// EdabitsVerifier struct
-#[derive(Clone)]
-pub struct EdabitsVerifier<FE: FiniteField> {
-    #[allow(missing_docs)]
-    pub bits: Vec<MacVerifier<F40b>>,
-    #[allow(missing_docs)]
-    pub value: MacVerifier<FE>,
 }
 
 #[allow(unused)]
@@ -167,6 +153,75 @@ fn check_parameters<FE: FiniteField>(n: usize, gamma: usize) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+/// generate random edabits
+pub fn random_edabits_prover<FE: FiniteField, C: AbstractChannel, RNG: CryptoRng + Rng>(
+    f2_prover: &mut FComProver<F40b>,
+    fp_prover: &mut FComProver<FE>,
+    channel: &mut C,
+    rng: &mut RNG,
+    bitsize: usize,
+    num: usize,
+) -> Result<Vec<EdabitsProver<FE>>> {
+    let mut edabits_vec = Vec::with_capacity(num);
+
+    let mut aux_bits = Vec::with_capacity(num);
+    let mut aux_r_m = Vec::with_capacity(num);
+    for _ in 0..num {
+        let mut bits = Vec::with_capacity(bitsize);
+        for _ in 0..bitsize {
+            bits.push(f2_prover.random(channel, rng)?);
+        }
+        let r_m: FE::PrimeField = convert_bits_to_field::<FE::PrimeField>(
+            bits.iter()
+                .map(|x| x.value())
+                .collect::<Vec<F2>>()
+                .as_slice(),
+        );
+        aux_bits.push(bits);
+        aux_r_m.push(r_m);
+    }
+
+    let aux_r_m_mac: Vec<FE> = fp_prover.input(channel, rng, &aux_r_m)?;
+
+    for (i, aux_bits) in aux_bits.into_iter().enumerate() {
+        edabits_vec.push(EdabitsProver {
+            bits: aux_bits,
+            value: MacProver::new(aux_r_m[i], aux_r_m_mac[i]),
+        });
+    }
+    Ok(edabits_vec)
+}
+
+/// generate random edabits
+pub fn random_edabits_verifier<FE: FiniteField, C: AbstractChannel, RNG: CryptoRng + Rng>(
+    f2_verifier: &mut FComVerifier<F40b>,
+    fp_verifier: &mut FComVerifier<FE>,
+    channel: &mut C,
+    rng: &mut RNG,
+    bit_size: usize,
+    num: usize,
+) -> Result<Vec<EdabitsVerifier<FE>>> {
+    let mut edabits_vec_mac = Vec::with_capacity(num);
+    let mut aux_bits = Vec::with_capacity(num);
+    for _ in 0..num {
+        let mut bits = Vec::with_capacity(bit_size);
+        for _ in 0..bit_size {
+            bits.push(f2_verifier.random(channel, rng)?);
+        }
+        aux_bits.push(bits);
+    }
+
+    let aux_r_m_mac = fp_verifier.input(channel, rng, num)?;
+
+    for (i, aux_bits) in aux_bits.into_iter().enumerate() {
+        edabits_vec_mac.push(EdabitsVerifier {
+            bits: aux_bits,
+            value: aux_r_m_mac[i],
+        });
+    }
+    Ok(edabits_vec_mac)
 }
 
 /// Generic Type synonym to Rc<RefCell<X>>.
@@ -431,34 +486,14 @@ impl<FE: FiniteField<PrimeField = FE>> ProverConv<FE> {
         nb_bits: usize,
         num: usize, // in the paper: NB + C
     ) -> Result<Vec<EdabitsProver<FE>>> {
-        let mut edabits_vec = Vec::with_capacity(num);
-
-        let mut aux_bits = Vec::with_capacity(num);
-        let mut aux_r_m = Vec::with_capacity(num);
-        for _ in 0..num {
-            let mut bits = Vec::with_capacity(nb_bits);
-            for _ in 0..nb_bits {
-                bits.push(self.fcom_f2.get_refmut().random(channel, rng)?);
-            }
-            let r_m: FE::PrimeField = convert_bits_to_field::<FE::PrimeField>(
-                bits.iter()
-                    .map(|x| x.value())
-                    .collect::<Vec<F2>>()
-                    .as_slice(),
-            );
-            aux_bits.push(bits);
-            aux_r_m.push(r_m);
-        }
-
-        let aux_r_m_mac: Vec<FE> = self.fcom_fe.get_refmut().input(channel, rng, &aux_r_m)?;
-
-        for (i, aux_bits) in aux_bits.into_iter().enumerate() {
-            edabits_vec.push(EdabitsProver {
-                bits: aux_bits,
-                value: MacProver::new(aux_r_m[i], aux_r_m_mac[i]),
-            });
-        }
-        Ok(edabits_vec)
+        random_edabits_prover(
+            &mut self.fcom_f2.get_refmut(),
+            &mut self.fcom_fe.get_refmut(),
+            channel,
+            rng,
+            nb_bits,
+            num,
+        )
     }
 
     /// generate random edabits
@@ -968,6 +1003,168 @@ impl<FE: FiniteField<PrimeField = FE>> ProverConv<FE> {
     }
 }
 
+/// Select the best cut'n'choose parameters to check a given number of conversion tuples with the
+/// A2B protocol. Returns (B,C) such that C edabits should be opened and B edabits should be used
+/// to verify each conversion tuple.
+fn select_best_cut_and_choose_parameters(num_conversions: usize) -> (usize, usize) {
+    assert!(num_conversions >= 1024);
+    let num_buckets = if num_conversions < 10322 {
+        5
+    } else if num_conversions < 1048576 {
+        4
+    } else {
+        3
+    };
+    (num_buckets, num_buckets)
+}
+
+impl<FE: FiniteField<PrimeField = FE>> ProverFromHomComsT<FE> for ProverConv<FE> {
+    fn from_homcoms(
+        fcom_f2: &RcRefCell<FComProver<F40b>>,
+        fcom_fe: &RcRefCell<FComProver<FE>>,
+    ) -> Result<Self> {
+        Self::init_zero(fcom_f2, fcom_fe)
+    }
+}
+
+fn estimate_voles_impl<FE: FiniteField>(n: usize, k: u32) -> (usize, usize) {
+    if n == 0 {
+        return (0, 0);
+    }
+
+    let (num_buckets, num_cut) = select_best_cut_and_choose_parameters(n);
+    let num_random_edabits = n * num_buckets + num_cut;
+    let num_random_dabits = n * num_buckets;
+
+    // VOLEs for the random edabits
+    let (mut num_voles_2, mut num_voles_p) = (num_random_edabits * k as usize, num_random_edabits);
+    // VOLEs for the random dabits
+    num_voles_2 += num_random_dabits;
+    num_voles_p += num_random_dabits;
+    // VOLEs for fdabit check
+    let gamma =
+        std::mem::size_of::<usize>() * 8 - ((num_random_dabits + 1).leading_zeros() as usize);
+    num_voles_2 += FDABIT_SECURITY_PARAMETER;
+    num_voles_p += 2 * FDABIT_SECURITY_PARAMETER * gamma + Degree::<FE>::USIZE;
+    // VOLEs for bit_add_carry
+    num_voles_2 += num_buckets * (n + n * k as usize + Degree::<F40b>::USIZE);
+    num_voles_p += 0;
+
+    (num_voles_2, num_voles_p)
+}
+
+impl<FE: FiniteField<PrimeField = FE>> ConvProverT<FE> for ProverConv<FE> {
+    fn verify_conversions<C: AbstractChannel, RNG: CryptoRng + Rng>(
+        &mut self,
+        channel: &mut C,
+        rng: &mut RNG,
+        edabits_vector: &[EdabitsProver<FE>],
+    ) -> Result<()> {
+        let (num_buckets, num_cut) = select_best_cut_and_choose_parameters(edabits_vector.len());
+        self.conv(channel, rng, num_buckets, num_cut, edabits_vector, None)
+    }
+
+    fn estimate_voles(n: usize, k: u32) -> (usize, usize) {
+        estimate_voles_impl::<FE>(n, k)
+    }
+}
+
+impl<FE: FiniteField<PrimeField = FE>> FPMProverT<FE> for ProverConv<FE> {
+    fn verify_fp_mult<C: AbstractChannel, RNG: CryptoRng + Rng>(
+        &mut self,
+        channel: &mut C,
+        rng: &mut RNG,
+        fpm_tuples: &[MultTripleProver<FE>],
+        k: u32,
+        f: u32,
+    ) -> Result<()> {
+        if fpm_tuples.is_empty() {
+            return Ok(());
+        }
+        let num_fpmts = fpm_tuples.len();
+        assert!(num_fpmts >= 1024);
+        let bit_size = (k + 2 * f) as usize;
+
+        let mut multiplication_triples = Vec::with_capacity(num_fpmts);
+        let mut conversion_tuples_low = Vec::with_capacity(num_fpmts);
+        let mut conversion_tuples_high = Vec::with_capacity(num_fpmts);
+        let mut zeros = Vec::with_capacity(num_fpmts);
+
+        let two_to_the_f = {
+            let two = FE::PrimeField::ONE + FE::PrimeField::ONE;
+            let mut res = FE::PrimeField::ONE;
+            for _ in 0..f {
+                res = res * two;
+            }
+            res
+        };
+
+        {
+            let mut fcom_fe = self.fcom_fe.get_refmut();
+            let mut fcom_f2 = self.fcom_f2.get_refmut();
+
+            for (x, y, z_h) in fpm_tuples.iter() {
+                let z_val = x.value() * y.value();
+                let z_mac = fcom_fe.input1(channel, rng, z_val)?;
+                let z = MacProver::new(z_val, z_mac);
+                let z_l = fcom_fe.sub(z, fcom_fe.affine_mult_cst(two_to_the_f, *z_h));
+                let z_bits = z_val
+                    .bit_decomposition()
+                    .iter()
+                    .take(bit_size)
+                    .map(|b| F2::from(*b))
+                    .collect::<Vec<F2>>();
+
+                let z_bits_macs = fcom_f2.input(channel, rng, &z_bits)?;
+                let mut low_bits = Vec::with_capacity(f as usize);
+                let mut high_bits = Vec::with_capacity((k + f) as usize);
+                for (i, bit_i) in izip!(z_bits.into_iter(), z_bits_macs.into_iter())
+                    .map(|(b, m)| MacProver::new(b, m))
+                    .enumerate()
+                {
+                    if i < f as usize {
+                        low_bits.push(bit_i);
+                    } else {
+                        high_bits.push(bit_i);
+                    }
+                }
+                multiplication_triples.push((*x, *y, z));
+                conversion_tuples_low.push(EdabitsProver {
+                    value: z_l,
+                    bits: low_bits,
+                });
+                conversion_tuples_high.push(EdabitsProver {
+                    value: *z_h,
+                    bits: high_bits,
+                });
+                zeros.push(fcom_fe.sub(
+                    fcom_fe.sub(z, z_l),
+                    fcom_fe.affine_mult_cst(two_to_the_f, *z_h),
+                ));
+            }
+
+            channel.flush()?;
+        }
+
+        self.fcom_fe.get_refmut().quicksilver_check_multiply(
+            channel,
+            rng,
+            &multiplication_triples,
+        )?;
+        self.verify_conversions(channel, rng, &conversion_tuples_low)?;
+        self.verify_conversions(channel, rng, &conversion_tuples_high)?;
+        self.fcom_fe.get_refmut().check_zero(channel, &zeros)?;
+
+        Ok(())
+    }
+
+    fn estimate_voles(n: usize, k: u32, f: u32) -> (usize, usize) {
+        let (n2_a, np_a) = <Self as ConvProverT<FE>>::estimate_voles(n, k + f);
+        let (n2_b, np_b) = <Self as ConvProverT<FE>>::estimate_voles(n, f);
+        (n2_a + n2_b + n * (k + 2 * f) as usize, np_a + np_b + n + 1)
+    }
+}
+
 /// Verifier for the edabits conversion protocol
 pub struct VerifierConv<FE: FiniteField> {
     #[allow(missing_docs)]
@@ -1177,25 +1374,14 @@ impl<FE: FiniteField<PrimeField = FE>> VerifierConv<FE> {
         nb_bits: usize,
         num: usize, // in the paper: NB + C
     ) -> Result<Vec<EdabitsVerifier<FE>>> {
-        let mut edabits_vec_mac = Vec::with_capacity(num);
-        let mut aux_bits = Vec::with_capacity(num);
-        for _ in 0..num {
-            let mut bits = Vec::with_capacity(nb_bits);
-            for _ in 0..nb_bits {
-                bits.push(self.fcom_f2.get_refmut().random(channel, rng)?);
-            }
-            aux_bits.push(bits);
-        }
-
-        let aux_r_m_mac = self.fcom_fe.get_refmut().input(channel, rng, num)?;
-
-        for (i, aux_bits) in aux_bits.into_iter().enumerate() {
-            edabits_vec_mac.push(EdabitsVerifier {
-                bits: aux_bits,
-                value: aux_r_m_mac[i],
-            });
-        }
-        Ok(edabits_vec_mac)
+        random_edabits_verifier(
+            &mut self.fcom_f2.get_refmut(),
+            &mut self.fcom_fe.get_refmut(),
+            channel,
+            rng,
+            nb_bits,
+            num,
+        )
     }
 
     /// generate random edabits
@@ -1692,25 +1878,131 @@ impl<FE: FiniteField<PrimeField = FE>> VerifierConv<FE> {
     }
 }
 
+impl<FE: FiniteField<PrimeField = FE>> VerifierFromHomComsT<FE> for VerifierConv<FE> {
+    fn from_homcoms(
+        fcom_f2: &RcRefCell<FComVerifier<F40b>>,
+        fcom_fe: &RcRefCell<FComVerifier<FE>>,
+    ) -> Result<Self> {
+        Self::init_zero(fcom_f2, fcom_fe)
+    }
+}
+
+impl<FE: FiniteField<PrimeField = FE>> ConvVerifierT<FE> for VerifierConv<FE> {
+    fn verify_conversions<C: AbstractChannel, RNG: CryptoRng + Rng>(
+        &mut self,
+        channel: &mut C,
+        rng: &mut RNG,
+        edabits_vector: &[EdabitsVerifier<FE>],
+    ) -> Result<()> {
+        let (num_buckets, num_cut) = select_best_cut_and_choose_parameters(edabits_vector.len());
+        self.conv(channel, rng, num_buckets, num_cut, edabits_vector, None)
+    }
+
+    fn estimate_voles(n: usize, k: u32) -> (usize, usize) {
+        estimate_voles_impl::<FE>(n, k)
+    }
+}
+
+impl<FE: FiniteField<PrimeField = FE>> FPMVerifierT<FE> for VerifierConv<FE> {
+    fn verify_fp_mult<C: AbstractChannel, RNG: CryptoRng + Rng>(
+        &mut self,
+        channel: &mut C,
+        rng: &mut RNG,
+        fpm_tuples: &[MultTripleVerifier<FE>],
+        k: u32,
+        f: u32,
+    ) -> Result<()> {
+        if fpm_tuples.is_empty() {
+            return Ok(());
+        }
+        let num_fpmts = fpm_tuples.len();
+        assert!(num_fpmts >= 1024);
+        let bit_size = (k + 2 * f) as usize;
+
+        let mut multiplication_triples = Vec::with_capacity(num_fpmts);
+        let mut conversion_tuples_low = Vec::with_capacity(num_fpmts);
+        let mut conversion_tuples_high = Vec::with_capacity(num_fpmts);
+        let mut zeros = Vec::with_capacity(num_fpmts);
+
+        let two_to_the_f = {
+            let two = FE::PrimeField::ONE + FE::PrimeField::ONE;
+            let mut res = FE::PrimeField::ONE;
+            for _ in 0..f {
+                res = res * two;
+            }
+            res
+        };
+
+        {
+            let mut fcom_fe = self.fcom_fe.get_refmut();
+            let mut fcom_f2 = self.fcom_f2.get_refmut();
+
+            for (x, y, z_h) in fpm_tuples.iter() {
+                let z = fcom_fe.input1(channel, rng)?;
+                let z_l = fcom_fe.sub(z, fcom_fe.affine_mult_cst(two_to_the_f, *z_h));
+                let z_bits = fcom_f2.input(channel, rng, bit_size)?;
+                let mut low_bits = Vec::with_capacity(f as usize);
+                let mut high_bits = Vec::with_capacity((k + f) as usize);
+                for (i, bit_i) in z_bits.into_iter().enumerate() {
+                    if i < f as usize {
+                        low_bits.push(bit_i);
+                    } else {
+                        high_bits.push(bit_i);
+                    }
+                }
+                multiplication_triples.push((*x, *y, z));
+                conversion_tuples_low.push(EdabitsVerifier {
+                    value: z_l,
+                    bits: low_bits,
+                });
+                conversion_tuples_high.push(EdabitsVerifier {
+                    value: *z_h,
+                    bits: high_bits,
+                });
+                zeros.push(fcom_fe.sub(
+                    fcom_fe.sub(z, z_l),
+                    fcom_fe.affine_mult_cst(two_to_the_f, *z_h),
+                ));
+            }
+        }
+
+        self.fcom_fe.get_refmut().quicksilver_check_multiply(
+            channel,
+            rng,
+            &multiplication_triples,
+        )?;
+        self.verify_conversions(channel, rng, &conversion_tuples_low)?;
+        self.verify_conversions(channel, rng, &conversion_tuples_high)?;
+        self.fcom_fe.get_refmut().check_zero(channel, rng, &zeros)?;
+
+        Ok(())
+    }
+
+    fn estimate_voles(n: usize, k: u32, f: u32) -> (usize, usize) {
+        let (n2_a, np_a) = <Self as ConvVerifierT<FE>>::estimate_voles(n, k + f);
+        let (n2_b, np_b) = <Self as ConvVerifierT<FE>>::estimate_voles(n, f);
+        (n2_a + n2_b + n * (k + 2 * f) as usize, np_a + np_b + n + 1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
-    use super::super::homcom::{MacProver, MacVerifier};
-    use super::convert_bits_to_field;
-    use super::{
-        f2_to_fe, DabitProver, DabitVerifier, EdabitsProver, EdabitsVerifier, ProverConv,
-        VerifierConv,
-    };
+    use super::*;
+    use crate::trunc::{random_fpm_triples_prover, random_fpm_triples_verifier};
     #[allow(unused)]
     use log::{debug, info, warn};
     use ocelot::svole::wykw::{LPN_EXTEND_SMALL, LPN_SETUP_SMALL};
+    use rand::thread_rng;
     #[cfg(feature = "ff")]
     use scuttlebutt::field::F384p;
     use scuttlebutt::ring::FiniteRing;
+    use scuttlebutt::track_unix_channel_pair;
     use scuttlebutt::{
-        field::{F61p, FiniteField, F2},
+        field::{F40b, F61p, FiniteField, F2},
         AesRng, Channel,
     };
+    use std::thread;
     use std::{
         io::{BufReader, BufWriter},
         os::unix::net::UnixStream,
@@ -2108,6 +2400,96 @@ mod tests {
         handle.join().unwrap();
     }
 
+    fn test_trunc<FE: FiniteField<PrimeField = FE>>() {
+        let n = 1024;
+        let integer_size: u32 = 8;
+        let fraction_size: u32 = 3;
+        let (mut channel_v, mut channel_p) = track_unix_channel_pair();
+        let prover_thread = thread::spawn(move || {
+            let mut rng = thread_rng();
+            let fcom_p = RcRefCell::new(
+                FComProver::<F61p>::init(
+                    &mut channel_p,
+                    &mut rng,
+                    LPN_SETUP_SMALL,
+                    LPN_EXTEND_SMALL,
+                )
+                .expect("FComProver::init failed"),
+            );
+            let fcom_2 = RcRefCell::new(
+                FComProver::<F40b>::init(
+                    &mut channel_p,
+                    &mut rng,
+                    LPN_SETUP_SMALL,
+                    LPN_EXTEND_SMALL,
+                )
+                .expect("FComProver::init failed"),
+            );
+            let mut conv: ProverConv<F61p> =
+                ProverConv::from_homcoms(&fcom_2, &fcom_p).expect("new failed");
+            let fpmts: Vec<MultTripleProver<F61p>> = random_fpm_triples_prover(
+                &mut fcom_p.get_refmut(),
+                &mut channel_p,
+                &mut rng,
+                integer_size,
+                fraction_size,
+                n,
+            )
+            .expect("random fpm gen failed");
+
+            channel_p.flush().expect("flush failed");
+
+            let result = conv.verify_fp_mult(
+                &mut channel_p,
+                &mut rng,
+                &fpmts,
+                integer_size,
+                fraction_size,
+            );
+            result.expect("verification failed");
+        });
+        let verifier_thread = thread::spawn(move || {
+            let mut rng = thread_rng();
+            let fcom_p = RcRefCell::new(
+                FComVerifier::<F61p>::init(
+                    &mut channel_v,
+                    &mut rng,
+                    LPN_SETUP_SMALL,
+                    LPN_EXTEND_SMALL,
+                )
+                .expect("FComVerifier::init failed"),
+            );
+            let fcom_2 = RcRefCell::new(
+                FComVerifier::<F40b>::init(
+                    &mut channel_v,
+                    &mut rng,
+                    LPN_SETUP_SMALL,
+                    LPN_EXTEND_SMALL,
+                )
+                .expect("FComVerifier::init failed"),
+            );
+            let mut conv: VerifierConv<F61p> =
+                VerifierConv::from_homcoms(&fcom_2, &fcom_p).expect("new failed");
+            let fpmts: Vec<MultTripleVerifier<F61p>> =
+                random_fpm_triples_verifier(&mut fcom_p.get_refmut(), &mut channel_v, &mut rng, n)
+                    .expect("random fpm gen failed");
+
+            channel_v.flush().expect("flush failed");
+
+            let result = conv.verify_fp_mult(
+                &mut channel_v,
+                &mut rng,
+                &fpmts,
+                integer_size,
+                fraction_size,
+            );
+            result.expect("verification failed");
+        });
+
+        prover_thread.join().expect("join failed");
+        verifier_thread.join().expect("join failed");
+    }
+
     #[test]
     fn test_convert_bit_2_field_f61p() {
         test_convert_bit_2_field::<F61p>();
@@ -2137,5 +2519,10 @@ mod tests {
     #[test]
     fn test_conv_f61p() {
         test_conv::<F61p>();
+    }
+
+    #[test]
+    fn test_trunc_f61p() {
+        test_trunc::<F61p>();
     }
 }
