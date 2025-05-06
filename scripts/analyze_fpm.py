@@ -38,6 +38,7 @@ def load_data(path):
 
 
 def make_dataframe(raw_data):
+    assert len(raw_data) > 0
     df = pd.concat(pd.json_normalize(rd) for rd in raw_data)
 
     for c in df.columns:
@@ -139,16 +140,25 @@ def main(argv):
     #          df = pd.read_pickle(f)
     #  except:
     #      raw_data = load_data(path)
+    #      if len(raw_data) == 0:
+    #          print(f"ERROR: no data found in '{path}'", file=sys.stderr)
+    #          sys.exit(1)
     #      df = make_dataframe(raw_data)
     #      with open(cache_name, 'wb') as f:
     #          df.to_pickle(f)
 
     # ... and comment out these lines
     raw_data = load_data(path)
+    if len(raw_data) == 0:
+        print(f"ERROR: no data found in '{path}'", file=sys.stderr)
+        sys.exit(1)
     df = make_dataframe(raw_data)
 
     tab = make_tables(df)
     print_tables(tab)
+    csv_path = os.path.join(path, 'res_fpm.csv')
+    print(f"saving table to '{csv_path}'")
+    tab.to_csv(csv_path)
 
 
 if __name__ == '__main__':

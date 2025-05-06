@@ -20,6 +20,9 @@ We give an overview of our additions and modifications in the [here](diet-mac-an
 ## Build and Test
 
 The implementation was developed and tested under Linux on an x86-64 CPU with AVX2 and Rust 1.81.
+To run the benchmarks the [`tc`](https://man.archlinux.org/man/tc.8) utility is required to simulate
+different network settings, and [pandas](https://pandas.pydata.org/) is used to analyse the
+benchmark results.
 
 The software expects a Git repository to be present.
 So if you download the software as .tar.gz/.zip archive instead of cloning the Git repository,
@@ -394,6 +397,8 @@ the terminal:
 ./analyze_conv.py results/
 ./analyze_fpm.py results/
 ```
+Both scripts display a pandas dataframe to the terminal and store corresponding CSV files
+(`res_conv.csv` and `res_fpm.csv`) in the passed directory.
 
 
 ## License

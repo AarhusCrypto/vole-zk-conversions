@@ -1,8 +1,8 @@
 #!/bin/bash
 
-set -euxo pipefail
+set -euo pipefail
 
-echo "enter password:"
+echo "enter sudo password:"
 read -s PASSWD
 export PASSWD
 export SUDO_ASKPASS=./asker.sh
@@ -30,7 +30,7 @@ function bench {
     bit_size="$2"
     num="$3"
     network_setting="$4"
-    output_file_name="ched__party=${PARTY}_protocol=${protocol}__bit-size=${bit_size}__num=${num}__network=${network_setting}__time=$(date --iso-8601=ns).json"
+    output_file_name="conv__party=${PARTY}_protocol=${protocol}__bit-size=${bit_size}__num=${num}__network=${network_setting}__time=$(date --iso-8601=ns).json"
 
     time -p ../target/release/examples/bench \
         conv \
@@ -41,7 +41,7 @@ function bench {
         --bit-size "${bit_size}" \
         --repetitions "${REPETITIONS}" \
         --json \
-    | tee "results/${output_file_name}"
+    > "results/${output_file_name}"
 }
 
 # NB: edabits needs to verify at least 1024 convs
@@ -63,6 +63,7 @@ fi
 for num in 256; do
     for bit_size in $BIT_SIZES; do
         for protocol in $PROTOCOLS_NO_EDABITS; do
+            echo "[+] Running conv_protocol=${protocol}, bit_size=${bit_size}, num=${num}, network=lan"
             bench "${protocol}" "${bit_size}" "${num}" lan
         done
     done
@@ -70,6 +71,7 @@ done
 for bit_size in $BIT_SIZES; do
     for num in $NUMS; do
         for protocol in $PROTOCOLS; do
+            echo "[+] Running conv_protocol=${protocol}, bit_size=${bit_size}, num=${num}, network=lan"
             bench "${protocol}" "${bit_size}" "${num}" lan
         done
     done
@@ -84,6 +86,7 @@ fi
 for num in 256; do
     for bit_size in $BIT_SIZES; do
         for protocol in $PROTOCOLS_NO_EDABITS; do
+            echo "[+] Running conv_protocol=${protocol}, bit_size=${bit_size}, num=${num}, network=wan"
             bench "${protocol}" "${bit_size}" "${num}" wan
         done
     done
@@ -91,6 +94,7 @@ done
 for bit_size in $BIT_SIZES; do
     for num in $NUMS; do
         for protocol in $PROTOCOLS; do
+            echo "[+] Running conv_protocol=${protocol}, bit_size=${bit_size}, num=${num}, network=wan"
             bench "${protocol}" "${bit_size}" "${num}" wan
         done
     done

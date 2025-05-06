@@ -1,8 +1,8 @@
 #!/bin/bash
 
-set -euxo pipefail
+set -euo pipefail
 
-echo "enter password:"
+echo "enter sudo password:"
 read -s PASSWD
 export PASSWD
 export SUDO_ASKPASS=./asker.sh
@@ -43,7 +43,7 @@ function bench {
         --fraction-size "${fraction_size}" \
         --repetitions "${REPETITIONS}" \
         --json \
-    | tee "results/${output_file_name}"
+    > "results/${output_file_name}"
 }
 
 # NB: for fpm, v1/v2 does not matter, and edabits needs to verify at least 1024 fpms
@@ -67,6 +67,7 @@ for num in 256; do
     for integer_size in $INTEGER_SIZES; do
         for fraction_size in $FRACTION_SIZES; do
             for protocol in $PROTOCOLS_NO_EDABITS; do
+                echo "[+] Running fpm_protocol=${protocol}, integer_size=${integer_size}, fraction_size=${fraction_size}, num=${num}, network=lan"
                 bench "${protocol}" "${integer_size}" "${fraction_size}" "${num}" lan
             done
         done
@@ -76,6 +77,7 @@ for num in $NUMS; do
     for integer_size in $INTEGER_SIZES; do
         for fraction_size in $FRACTION_SIZES; do
             for protocol in $PROTOCOLS; do
+                echo "[+] Running fpm_protocol=${protocol}, integer_size=${integer_size}, fraction_size=${fraction_size}, num=${num}, network=lan"
                 bench "${protocol}" "${integer_size}" "${fraction_size}" "${num}" lan
             done
         done
@@ -93,6 +95,7 @@ for num in 256; do
     for integer_size in $INTEGER_SIZES; do
         for fraction_size in $FRACTION_SIZES; do
             for protocol in $PROTOCOLS_NO_EDABITS; do
+                echo "[+] Running fpm_protocol=${protocol}, integer_size=${integer_size}, fraction_size=${fraction_size}, num=${num}, network=wan"
                 bench "${protocol}" "${integer_size}" "${fraction_size}" "${num}" wan
             done
         done
@@ -102,6 +105,7 @@ for num in $NUMS; do
     for integer_size in $INTEGER_SIZES; do
         for fraction_size in $FRACTION_SIZES; do
             for protocol in $PROTOCOLS; do
+                echo "[+] Running fpm_protocol=${protocol}, integer_size=${integer_size}, fraction_size=${fraction_size}, num=${num}, network=wan"
                 bench "${protocol}" "${integer_size}" "${fraction_size}" "${num}" wan
             done
         done

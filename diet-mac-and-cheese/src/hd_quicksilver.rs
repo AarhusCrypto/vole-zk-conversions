@@ -549,9 +549,6 @@ where
         }
     }
     channel.flush()?;
-    for i in 0..num_chunks {
-        eprintln!("chunks[{}] = {:#?}", i, chunks[i]);
-    }
 
     // initialize qs state
     let chi = channel.read_serializable()?;

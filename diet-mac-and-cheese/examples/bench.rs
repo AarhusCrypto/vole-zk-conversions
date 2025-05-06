@@ -1520,16 +1520,15 @@ fn run_prover<C: AbstractChannel>(
             conv_opts,
         } => ProtocolStats::Conversion(match conv_opts.field {
             FieldParameter::F61p => run_conv_prover::<F61p, _>(channel, common_opts, conv_opts),
-            _ => unimplemented!("TODO"),
+            _ => unimplemented!("only implemented for field F61p"),
         }),
         BenchmarkCommand::FixedPointMult {
             common_opts,
             fpm_opts,
         } => ProtocolStats::FixedPointMult(match fpm_opts.field {
             FieldParameter::F61p => run_fpm_prover::<F61p, _>(channel, common_opts, fpm_opts),
-            _ => unimplemented!("TODO"),
+            _ => unimplemented!("only implemented for field F61p"),
         }),
-        _ => unimplemented!("TODO"),
     }
 }
 
@@ -1550,16 +1549,15 @@ fn run_verifier<C: AbstractChannel>(
             conv_opts,
         } => ProtocolStats::Conversion(match conv_opts.field {
             FieldParameter::F61p => run_conv_verifier::<F61p, _>(channel, common_opts, conv_opts),
-            _ => unimplemented!("TODO"),
+            _ => unimplemented!("only implemented for field F61p"),
         }),
         BenchmarkCommand::FixedPointMult {
             common_opts,
             fpm_opts,
         } => ProtocolStats::FixedPointMult(match fpm_opts.field {
             FieldParameter::F61p => run_fpm_verifier::<F61p, _>(channel, common_opts, fpm_opts),
-            _ => unimplemented!("TODO"),
+            _ => unimplemented!("only implemented for field F61p"),
         }),
-        _ => unimplemented!("TODO"),
     }
 }
 
